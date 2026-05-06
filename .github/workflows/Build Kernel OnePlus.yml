@@ -877,39 +877,6 @@ jobs:
           cp ${RE_DIR}/rekernel.c ${RE_DIR}/rekernel.h ${RE_DIR}/Makefile ${RE_DIR}/Kconfig drivers/rekernel/
           sed -i "s|^\s*//\s*#define KERNEL_${KERNEL_SHORT_PATCH_VERSION}|\#define KERNEL_${KERNEL_SHORT_PATCH_VERSION}|" drivers/rekernel/rekernel.h
 
-      - name: Apply DROID_SPACES
-        if: ${{ github.event.inputs.DROID_SPACES == 'true' }}
-        run: |
-          PATCH_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/patches"
-          cd kernel_workspace/kernel_platform/common
-          # 注释掉原始的 sysv 结构体定义
-          sed -i 's/struct sysv_sem\s*sysvsem;/\/\/ struct sysv_sem\t\t\tsysvsem;/g' include/linux/sched.h
-          sed -i 's/struct sysv_shm\s*sysvshm;/\/\/ struct sysv_shm\t\t\tsysvshm;/g' include/linux/sched.h
-          if [ "$KMI" = "android12-5.10" ]; then
-            echo "正在为 android12-5.10 修复 sysvipc KABI 绕过及 POSIX_MQUEUE ABI 填充问题..."
-            sed -i '/^\tconst struct sched_class\t\*sched_class;/a \\n#ifndef __GENKSYMS__\n\tstruct sysv_sem\t\t\tsysvsem;\n\tstruct sysv_shm\t\t\tsysvshm;\n#endif\n' include/linux/sched.h
-            sed -i -e 's/^\tunsigned long mq_bytes;\t\/\* How many bytes can be allocated to mqueue\? \*\//\t\/\/unsigned long mq_bytes;\t\/* How many bytes can be allocated to mqueue? *\//' -e '/struct ratelimit_state ratelimit;/,/ANDROID_OEM_DATA_ARRAY(1, 2);/{/^\tANDROID_KABI_RESERVE(1);/{N;N;s/\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);/#if defined(CONFIG_POSIX_MQUEUE)\n\tANDROID_KABI_USE(1, unsigned long mq_bytes);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);\n#else\n\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_OEM_DATA_ARRAY(1, 2);\n#endif/}}' include/linux/sched/user.h
-          fi
-          # 检查sched.h并修改 KABI 槽位或指针
-          if grep -q "sched_dl_entity.*\*dl_server" include/linux/sched.h; then
-            echo "✅ 检测到 dl_server 指针，使用 packed union 方案"
-            sed -i 's|\tstruct sched_entity\t\tse;|#ifdef CONFIG_SYSVIPC\n\tunion {\n\t\tchar __kabi_ignored_0;\n\t\tstruct sysv_sem\t\t\tsysvsem;\n\t}__attribute__((packed));\n\tunion {\n\t\tchar __kabi_ignored_1;\n\t\tstruct sysv_shm\t\t\tsysvshm;\n\t}__attribute__((packed));\n#endif\n\n\tstruct sched_entity\t\tse;|' include/linux/sched.h
-          elif grep -q "ANDROID_KABI_USE(1," include/linux/sched.h; then
-            echo "✅ 检测到 USE(1)，使用槽位 6,7,8"
-            sed -i -e '/ANDROID_KABI_RESERVE(6);/{N;N;s|\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(6, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(7); ANDROID_KABI_RESERVE(8), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);\n#endif|;}' include/linux/sched.h
-          elif grep -q "ANDROID_KABI_RESERVE(1);" include/linux/sched.h; then
-            echo "✅ 检测到 RESERVE(1)，使用槽位 1,2,3"
-            sed -i -e '/ANDROID_KABI_RESERVE(1);/{N;N;N;N;N;N;N;s|\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(1, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(2); ANDROID_KABI_RESERVE(3), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(1);\n\tANDROID_KABI_RESERVE(2);\n\tANDROID_KABI_RESERVE(3);\n#endif\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);\n\tANDROID_KABI_RESERVE(7);\n\tANDROID_KABI_RESERVE(8);|;}' include/linux/sched.h
-          elif grep -q "ANDROID_KABI_RESERVE(3);" include/linux/sched.h; then
-            echo "✅ fallback，使用槽位 3,4,5"
-            sed -i -e '/ANDROID_KABI_RESERVE(3);/{N;N;N;s|\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n\tANDROID_KABI_RESERVE(6);|#ifdef CONFIG_SYSVIPC\n\tANDROID_KABI_USE(3, struct sysv_sem sysvsem);\n\t_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(4); ANDROID_KABI_RESERVE(5), struct sysv_shm sysvshm);\n#else\n\tANDROID_KABI_RESERVE(3);\n\tANDROID_KABI_RESERVE(4);\n\tANDROID_KABI_RESERVE(5);\n#endif\n\tANDROID_KABI_RESERVE(6);|;}' include/linux/sched.h
-          else
-            echo "❌ 无法通过上下文精准匹配 KABI 槽位或对应指针"
-            exit 9
-          fi
-          echo "为 oplus_bsp_midas 模块返回幽灵任务以避免空指针崩溃..."
-          patch -p1 --forward < "${PATCH_DIR}/ghost-task-for-midas.patch" || true
-
       - name: Apply LZ4_DEV
         if: ${{ github.event.inputs.LZ4_UPDATE == 'true' }}
         run: |
@@ -1238,6 +1205,27 @@ jobs:
         run: |
           echo "Disabling GPUEB for MTK kernel 5.10"
           sed -i '/obj-y.*gpueb/d' kernel_workspace/kernel-5.10/drivers/gpu/mediatek/Makefile
+
+
+      - name: 注入DroidSpaces内核配置
+        run: |
+          PATCH_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/patches"
+          cd kernel_workspace/kernel_platform/common
+          wget "https://raw.githubusercontent.com/Goldzxcbug/Droidspaces_Kernel_patch/refs/heads/main/GKI/5.10/GKI-5.10-sysvipc_kabi_6_7_8.patch"
+          wget "https://raw.githubusercontent.com/Goldzxcbug/Droidspaces_Kernel_patch/refs/heads/main/GKI/5.10/GKI_5.10_posix.patch"
+          patch -p1 < 'GKI-5.10-sysvipc_kabi_6_7_8.patch'
+          patch -p1 < 'GKI_5.10_posix.patch'
+          cd ../
+          # 修复 [✗] PID namespace 和 [✗] IPC namespace
+              echo "CONFIG_SYSVIPC=y" >> ./common/arch/arm64/configs/gki_defconfig
+              echo "CONFIG_POSIX_MQUEUE=y" >> ./common/arch/arm64/configs/gki_defconfig
+              echo "CONFIG_NAMESPACES=y" >> ./common/arch/arm64/configs/gki_defconfig
+              echo "CONFIG_PID_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+              echo "CONFIG_IPC_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+              
+            # 修复 [✗] devtmpfs support
+              echo "CONFIG_DEVTMPFS=y" >> ./common/arch/arm64/configs/gki_defconfig
+
 
       - name: Build Kernel FAST
         if: ${{ github.event.inputs.FAST_BUILD == 'true' }}
