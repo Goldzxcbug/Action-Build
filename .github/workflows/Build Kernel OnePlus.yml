@@ -311,12 +311,7 @@ jobs:
 
           echo "解析 README.md 获取 CPUD 和 BUILD_METHOD..."
           if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
-            # The official SM7475 setup script accepts waipio/gki.
-            CPUD="waipio"
-            BUILD_METHOD="gki"
-            echo "✅ CPUD=$CPUD, BUILD_METHOD=$BUILD_METHOD"
-            echo "CPUD=$CPUD" >> "$GITHUB_ENV"
-            echo "BUILD_METHOD=$BUILD_METHOD" >> "$GITHUB_ENV"
+            echo "✅ RMX3700 kernel-only build; OPlus vendor build target is not used"
           elif [[ -s "$README_PATH" ]]; then
             BUILD_LINE=$(grep -m1 'oplus_build_kernel.sh' "$README_PATH" || true)
             if [[ -n "$BUILD_LINE" ]]; then
@@ -477,11 +472,6 @@ jobs:
           cd kernel_workspace
           mkdir -p .repo/manifests
           cp "$GITHUB_WORKSPACE/.repo/manifests_fallback/${FILE}.xml" ".repo/manifests/${FILE}.xml"
-          if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
-            # The official vendor project uses path="./", so move the helper
-            # checkout out of the repo workspace until all projects are synced.
-            mv Action-Build "$GITHUB_WORKSPACE/Action-Build-helper"
-          fi
           BASE_URL="https://github.com/${MANIFEST_REPO}/${MANIFEST_REPO_NAME}.git"
 
           echo "使用$MANIFEST_REPO/$MANIFEST_REPO_NAME($MANIFEST_BRANCH)初始化仓库..."
@@ -515,10 +505,6 @@ jobs:
           if grep -q 'check_defconfig = None,' kernel_platform/build/kernel/kleaf/common_kernels.bzl; then
             sed -i 's/check_defconfig = None,/check_defconfig = "disabled",/' kernel_platform/build/kernel/kleaf/common_kernels.bzl
             sed -i 's/if check_defconfig == None:/if False:  # check_defconfig == None:/' kernel_platform/build/kernel/kleaf/common_kernels.bzl
-          fi
-
-          if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
-            ln -s "$GITHUB_WORKSPACE/Action-Build-helper" Action-Build
           fi
 
       - name: Kernel Version Handling
@@ -1408,13 +1394,36 @@ jobs:
       - name: Fallback to Build Kernel
         if: ${{ github.event.inputs.FAST_BUILD == 'false' || steps.fast_build.outputs.fallback == 'true' }}
         run: |
-          cd kernel_workspace
-          if [ -f ./kernel_platform/build_with_bazel.py ]; then
-            ./kernel_platform/oplus/bazel/oplus_modules_variant.sh ${{ env.CPUD }} ${{ env.BUILD_METHOD }}
-            ./kernel_platform/build_with_bazel.py -t ${{ env.CPUD }} ${{ env.BUILD_METHOD }}
+          if [ "${{ github.event.inputs.FILE }}" = "realme_gt_neo5se_b" ]; then
+            # RMX3700 kernel-only path: build the Android common kernel image
+            # directly, without the OPlus vendor build tree or vendor modules.
+            cd kernel_workspace/kernel_platform
+            CLANG_PREBUILT_BIN=$(grep -m1 '^CLANG_PREBUILT_BIN=' ./common/build.config.common | cut -d= -f2-)
+            if [[ -z "$CLANG_PREBUILT_BIN" || ! -x "$CLANG_PREBUILT_BIN/clang" ]]; then
+              echo "❌ Android common Clang toolchain was not found"
+              exit 13
+            fi
+            export PATH="$GITHUB_WORKSPACE/kernel_workspace/kernel_platform/$CLANG_PREBUILT_BIN:$PATH"
+            cd common
+            MAKE_ARGS=(LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTLD=ld.lld PAHOLE="$(command -v pahole)")
+            if [[ -n "${CONFIG_FAKE_DISABLE:-}" ]]; then
+              MAKE_ARGS+=(CONFIG_FAKE_DISABLE="$CONFIG_FAKE_DISABLE")
+            fi
+            make O=out "${MAKE_ARGS[@]}" gki_defconfig --no-print-directory
+            if [[ "$KERNEL_VERSION" == 5.* ]]; then
+              scripts/config --file out/.config -e LTO_CLANG -e LTO_CLANG_THIN -d LTO_CLANG_NONE -d LTO_CLANG_FULL
+            fi
+            make O=out "${MAKE_ARGS[@]}" olddefconfig --no-print-directory
+            make -j"$(nproc --all)" O=out "${MAKE_ARGS[@]}"
           else
-            LTO=thin SYSTEM_DLKM_RE_SIGN=0 BUILD_SYSTEM_DLKM=0 KMI_SYMBOL_LIST_STRICT_MODE=0 \
-            ./kernel_platform/oplus/build/oplus_build_kernel.sh ${{ env.CPUD }} ${{ env.BUILD_METHOD }}
+            cd kernel_workspace
+            if [ -f ./kernel_platform/build_with_bazel.py ]; then
+              ./kernel_platform/oplus/bazel/oplus_modules_variant.sh ${{ env.CPUD }} ${{ env.BUILD_METHOD }}
+              ./kernel_platform/build_with_bazel.py -t ${{ env.CPUD }} ${{ env.BUILD_METHOD }}
+            else
+              LTO=thin SYSTEM_DLKM_RE_SIGN=0 BUILD_SYSTEM_DLKM=0 KMI_SYMBOL_LIST_STRICT_MODE=0 \
+              ./kernel_platform/oplus/build/oplus_build_kernel.sh ${{ env.CPUD }} ${{ env.BUILD_METHOD }}
+            fi
           fi
 
       - name: Make AnyKernel3
