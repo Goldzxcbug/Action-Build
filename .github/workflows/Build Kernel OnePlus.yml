@@ -274,7 +274,7 @@ jobs:
           if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
             # This manifest lives in this workflow repository and pins the
             # official RMX3700 (GT Neo 5 SE / SM7475) Android B sources.
-            cp "$GITHUB_WORKSPACE/${FILE}.xml" "$XML_PATH"
+            curl -fsSL "https://raw.githubusercontent.com/Goldzxcbug/Action-Build/BakaSU/${FILE}.xml" -o "$XML_PATH"
             FOUND_REPO="Goldzxcbug"
             FOUND_REPO_NAME="Action-Build"
             FOUND_BRANCH="BakaSU"
