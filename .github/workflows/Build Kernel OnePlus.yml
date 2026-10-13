@@ -1,4 +1,4 @@
-name: Build All OnePlus Kernels
+name: Build Android Kernels
 on:
   workflow_dispatch:
     inputs:
@@ -8,6 +8,7 @@ on:
         required: true
         default: oneplus_15
         options:
+          - realme_gt_neo5se_b
           - oneplus_nord_n30_se_5g_v
           - oneplus_10r_v
           - oneplus_nord_3_b
@@ -270,7 +271,14 @@ jobs:
             done
             return 1
           }
-          if ! check_repo "${REPOS["OnePlusOSS"]}"; then
+          if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
+            # This manifest lives in this workflow repository and pins the
+            # official RMX3700 (GT Neo 5 SE / SM7475) Android B sources.
+            cp "$GITHUB_WORKSPACE/${FILE}.xml" "$XML_PATH"
+            FOUND_REPO="Goldzxcbug"
+            FOUND_REPO_NAME="Action-Build"
+            FOUND_BRANCH="BakaSU"
+          elif ! check_repo "${REPOS["OnePlusOSS"]}"; then
             if ! check_repo "${REPOS["Dynamic"]}"; then
               check_repo "${REPOS["Appendix"]}"
             fi
@@ -302,7 +310,14 @@ jobs:
           fi
 
           echo "解析 README.md 获取 CPUD 和 BUILD_METHOD..."
-          if [[ -s "$README_PATH" ]]; then
+          if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
+            # The official SM7475 setup script accepts waipio/gki.
+            CPUD="waipio"
+            BUILD_METHOD="gki"
+            echo "✅ CPUD=$CPUD, BUILD_METHOD=$BUILD_METHOD"
+            echo "CPUD=$CPUD" >> "$GITHUB_ENV"
+            echo "BUILD_METHOD=$BUILD_METHOD" >> "$GITHUB_ENV"
+          elif [[ -s "$README_PATH" ]]; then
             BUILD_LINE=$(grep -m1 'oplus_build_kernel.sh' "$README_PATH" || true)
             if [[ -n "$BUILD_LINE" ]]; then
               CPUD=$(echo "$BUILD_LINE" | awk '{print $(NF-1)}')
@@ -462,6 +477,11 @@ jobs:
           cd kernel_workspace
           mkdir -p .repo/manifests
           cp "$GITHUB_WORKSPACE/.repo/manifests_fallback/${FILE}.xml" ".repo/manifests/${FILE}.xml"
+          if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
+            # The official vendor project uses path="./", so move the helper
+            # checkout out of the repo workspace until all projects are synced.
+            mv Action-Build "$GITHUB_WORKSPACE/Action-Build-helper"
+          fi
           BASE_URL="https://github.com/${MANIFEST_REPO}/${MANIFEST_REPO_NAME}.git"
 
           echo "使用$MANIFEST_REPO/$MANIFEST_REPO_NAME($MANIFEST_BRANCH)初始化仓库..."
@@ -495,6 +515,10 @@ jobs:
           if grep -q 'check_defconfig = None,' kernel_platform/build/kernel/kleaf/common_kernels.bzl; then
             sed -i 's/check_defconfig = None,/check_defconfig = "disabled",/' kernel_platform/build/kernel/kleaf/common_kernels.bzl
             sed -i 's/if check_defconfig == None:/if False:  # check_defconfig == None:/' kernel_platform/build/kernel/kleaf/common_kernels.bzl
+          fi
+
+          if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
+            ln -s "$GITHUB_WORKSPACE/Action-Build-helper" Action-Build
           fi
 
       - name: Kernel Version Handling
@@ -1009,10 +1033,9 @@ jobs:
           fi
 
           # KPM配置
-          if [ "${{ github.event.inputs.KPM }}" = "KPM" ] || [ "${{ github.event.inputs.KPM }}" = "N/A" ]; then
+          if [ "${{ github.event.inputs.KPM }}" = "KPM" ]; then
             set_config "CONFIG_KPM=y"
-          fi
-          if [ "${{ github.event.inputs.KPM }}" = "KPN" ]; then
+          else
             set_config "CONFIG_KPM=n"
           fi
 
