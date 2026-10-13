@@ -479,8 +479,16 @@ jobs:
           sed -i -e '/prebuilts\/asuite"/{/ks-kernel\.lnx\.5\.0\.r3-rel/d}' -e '/tools\/tradefederation\/prebuilts"/{/ks-kernel\.lnx\.5\.0\.r3-rel/d}' ".repo/manifests/${FILE}.xml"
           repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
 
+          if [[ "$FILE" == "realme_gt_neo5se_b" ]]; then
+            # Kernel sources refer to vendor/oplus paths through symlinks.
+            # Expose the synced vendor source tree at the expected workspace path.
+            ln -s vendor-source/vendor vendor
+            test -f vendor/oplus/kernel/cpu/sched/Kconfig
+            echo "✅ vendor 源树已就位；后续只编译 common kernel Image"
+          fi
+
           KERNEL_REPOS=""
-          KERNEL_REPOS_PATH=$(find . -type f -name "build.config.msm.common" | head -n 1)
+          KERNEL_REPOS_PATH=$(find ./kernel_platform -type f -name "build.config.msm.common" | head -n 1)
           if [[ -n "$KERNEL_REPOS_PATH" ]]; then
             KERNEL_REPOS=$(echo "${KERNEL_REPOS_PATH#./}" | cut -d/ -f2)
             echo "✅ 发现 build.config.msm.common: $KERNEL_REPOS_PATH"
